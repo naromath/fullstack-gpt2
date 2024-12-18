@@ -5,3 +5,6 @@ files/
 .cache/
 .vscode/
 .env/
+9day/.cache
+9day/.streamlit
+try/
