@@ -43,16 +43,7 @@ class ChatCallbackHandler(BaseCallbackHandler):
         save_message(self.message, "ai")
             
                 
-        
-llm=ChatOpenAI(
-    model="gpt-4o-mini",
-    temperature=0.1,
-    streaming=True,
-    callbacks=[
-        ChatCallbackHandler(),
-    ]
-)
-
+    
 st.set_page_config(
     page_icon="🖥️",
     page_title="RAG PIPE"
@@ -118,17 +109,36 @@ with st.sidebar:
     file = st.file_uploader(
         "Upload a. txt .pdf or .docx file",
         type=["pdf","txt","docx"])
-    
-    open_ai_key = st.text_input("당신의 OPEN AI KEY를 입력해 주세요!")
+
+
 
 if file:
     retriever = embed_file(file)
     
-    send_message("준비 됬어요! 궁금한 점을 물어보세요", "ai", save=False)
+    
+
+    send_message("당신의 OPENAI API KEY를 왼쪽 창에 입력해 주세요", "ai", save=False)    
+      
+    
+    key = st.sidebar.text_input("OPENAI API KEY")
+    
+    if not key:
+        send_message("아직 API Key가 입력되지 않았습니다. 키를 입력해주세요.","ai", save=False)
+        st.stop()
+    else:
+        send_message("준비 됬어요! 궁금한 점을 물어보세요", "ai", save=False)             
+        
+    llm=ChatOpenAI(
+        model="gpt-4o-mini",
+        temperature=0.1,
+        streaming=True,
+        callbacks=[ChatCallbackHandler(),],
+        openai_api_key=key
+    )
     
     paint_history()
     
-    message= st.chat_input("Ask anythin about your file...")
+    message= st.chat_input("Ask anything about your file...")
     
     if message:
         send_message(message, "human")
