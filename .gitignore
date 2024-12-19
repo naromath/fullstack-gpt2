@@ -8,5 +8,4 @@ files/
 9day/.cache
 9day/.streamlit
 try/
-.streamlit/
-.streamlit/secrets.toml
+.streamlit
