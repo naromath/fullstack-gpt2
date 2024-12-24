@@ -11,124 +11,80 @@ Workers AI
 "벡터라이즈에서 단일 계정은 몇 개의 인덱스를 가질 수 있나요?"
 유저가 자체 OpenAI API 키를 사용하도록 허용하고, st.sidebar 내부의 st.input에서 이를 로드합니다.
 st.sidebar를 사용하여 Streamlit app과 함께 깃허브 리포지토리에 링크를 넣습니다.
+      
+url 입력 > url 저장 > 질문 입력 > 
 
-1. 데이터 로드 및 전처리
- - url data 불러오기
- - 전처리 하기
- 
-2. 데이터 전처리 및 임베딩
- - 문장 쪼개기(Chunking)
- - 
- 
-3. 벡터 데이터베이스(인덱스) 생성
- - faiss 사용하기
- - 저장하기
-  
-4. 검색 프로세스
- - 사용자 질의
- - 질의 임베딩
- - 벡터 인덱스에서 유사문서 topk 찾기
- - 검색된 문서(맥락)을 모델에게 전달
- - 모델이 답변 생성.
- 
-5 결과 활용
- - prompt 생성
- - 출력력
- 
-추가. llm 선정하기
- - api key 받기기
 """
 
-
-from langchain.chat_models import ChatOpenAI
-from langchain.document_loaders import SitemapLoader
+import streamlit as st
+from langchain_openai import ChatOpenAI
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores.faiss import FAISS
-from langchain.embeddings import OpenAIEmbeddings
+from langchain.document_loaders import SitemapLoader
+from langchain.vectorstores.faiss import FAISS 
+from langchain.embeddings import LocalAIEmbeddings, OpenAIEmbeddings
+from langchain.storage import LocalFileStore
 from langchain.schema.runnable import RunnablePassthrough, RunnableLambda
 from langchain.prompts import ChatPromptTemplate
 
-
-import streamlit as st
-
-
 llm = ChatOpenAI(
-        temperature=0.1,
-        model="gpt-4o-mini",
-    )
-
-# ----------------------------------------------------------------------
-# 1. sitemap에서 페이지 링크 읽어오기 & 최적화(전처리, chunking)
-# ----------------------------------------------------------------------
-
-url = "https://developers.cloudflare.com/sitemap-0.xml"
-
-
-splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1000,
-    chunk_overlap=200,
+    temperature=0.1,
+    model="gpt-4o-mini",
 )
 
+st.title("SiteGPT for Cloudflare")
+st.write("This is a SiteGPT version for Cloudflare documentation.")
 
-def parse_page(soup):
-    header = soup.find("header")
-    footer = soup.find("footer")
-    if header:
-        header.decompose()
-    if footer:  
-        footer.decompose()
-    return (
-        str(soup.get_text()).replace("\n", " ").replace("\r", " ").replace("\t", " ")
-    )
+url = "https://www.langchain.com/sitemap.xml"
 
 
-@st.cache_data(show_spinner="loading website...")
+@st.cache_resource(show_spinner="loading website...")
 def load_website(url):
-    loader = SitemapLoader(
-        url,
-        filter_urls=[    
-            "https://developers.cloudflare.com/ai-gatewa",
-            "https://developers.cloudflare.com/vectorize",
-            "https://developers.cloudflare.com/workers-ai",
-            ],
-        parsing_function=parse_page,
-        )
+    splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
+        chunk_size=1000,
+        chunk_overlap=200,
+    )
+    loader = SitemapLoader(url, parsing_function=parse_page)
     loader.requests_per_second = 2
     docs = loader.load_and_split(text_splitter=splitter)
     vector_store = FAISS.from_documents(docs, OpenAIEmbeddings())
+    vector_store.save_local(".cache/web_cache")
     retriever = vector_store.as_retriever()
     return retriever
 
-# ----------------------------------------------------------------------
-# 2. 프롬프트 및 검색 프로세스
-# ----------------------------------------------------------------------
 
-answer_prompt = ChatPromptTemplate.from_template(
+answers_prompt = ChatPromptTemplate.from_template(
     """
     Using ONLY the following context answer the user's question. If you can't just say you don't know, don't make anything up.
-                                                   
+                                                  
     Then, give a score to the answer between 0 and 5.
-    
+
+    If the answer answers the user question the score should be high, else it should be low.
+
+    Make sure to always include the answer's score even if it's 0.
+
+    Context: {context}
+                                                  
     Examples:
-    
+                                                  
     Question: How far away is the moon?
     Answer: The moon is 384,400 km away.
     Score: 5
-    
+                                                  
     Question: How far away is the sun?
     Answer: I don't know
     Score: 0
-    
+                                                  
     Your turn!
-    
-    Question: {question}    
-    """
+
+    Question: {question}
+"""
 )
+
 
 def get_answers(inputs):
     docs = inputs["docs"]
     question = inputs["question"]
-    answers_chain = answer_prompt | llm
+    answers_chain = answers_prompt | llm
     # answers = []
     # for doc in docs:
     #     result = answers_chain.invoke(
@@ -183,36 +139,45 @@ def choose_answer(inputs):
             "answers": condensed,
         }
     )
-    
-    
 
 
-
-# ----------------------------------------------------------------------
-# 6. 메인 Streamlit 앱
-# ----------------------------------------------------------------------
-
-st.title("SiteGPT for Cloudflare")
-st.write("This is a SiteGPT version for Cloudflare documentation.")
-
-api_key = st.sidebar.text_input("OpenAI API Key", type="password", help="Enter your personal OpenAI API key to run this app.")
-if not api_key:
-    st.warning("Please enter your OpenAI API key.")
-    st.stop()
-    
-retriever = load_website(url)
-query = st.text_input("Enter your question:")
-    
-if query:    
-    chain = (
-        {
-            "docs": retriever,
-            "question": RunnablePassthrough(),
-        }
-        | RunnableLambda(get_answers)
-        | RunnableLambda(choose_answer)
-        
+def parse_page(soup):
+    header = soup.find("header")
+    footer = soup.find("footer")
+    if header:
+        header.decompose()
+    if footer:
+        footer.decompose()
+    return (
+        str(soup.get_text())
+        .replace("\n", " ")
+        .replace("\t", " ")
+        .replace("\r", " ")
     )
-    
-    result = chain.invoke(query)
-    st.markdown(result.content)
+
+button_on = False
+
+
+with st.sidebar:
+    if st.button("Reload website"):
+        retriever = load_website(url)
+        st.success("Website reloaded successfully!")
+        button_on = True
+
+
+if button_on:
+    retriever = load_website(url)
+    print(retriever)
+    query = st.text_input("Enter your question:")
+    if query:
+        chain = (
+            {
+                "docs": retriever,
+                    "question": RunnablePassthrough(),
+            }
+            | RunnableLambda(get_answers)
+            | RunnableLambda(choose_answer)
+        )
+        result = chain.invoke(query)
+        print(result.content)
+        st.markdown(result.content.replace("$", "\$"))
